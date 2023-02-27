@@ -1,0 +1,9 @@
+# Cargo.toml 包含了报的配置,[package]包含了包名,版本号,编译器版本号等,[dependencies]包含项目的依赖包
+# src/main.rs文件包含包的根模块和 main 函数.编译使用 cargo build 编译,然后在 target/debug目录找到编译好的二进制文件.
+[package]
+name = "rust_os"
+version = "0.1.0"
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[dependencies]
