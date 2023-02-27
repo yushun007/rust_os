@@ -1,3 +1,4 @@
+//裸机程序,因为没有操作系统的支持,所以不能使用标准库,需要添加#![no_std]属性
+#![no_std]
 fn main() {
-    println!("Hello, world!");
 }
