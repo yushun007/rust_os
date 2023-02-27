@@ -5,5 +5,12 @@ name = "rust_os"
 version = "0.1.0"
 edition = "2018"
 
+# 解决eh_personality 语言项的错误
+# 指定 panic 时的行为
+[profile.dev]
+panic = "abort"
+
+[profile.release]
+panic = "abort"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
