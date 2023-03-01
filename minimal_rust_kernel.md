@@ -77,6 +77,7 @@ x86 支持两种固件标准:BIOS(basic Input/Output system)和 UEFI(Unified Ext
     "features":"-mmx,-sse,+soft-float"
 }
 ```
+
 - `llvm-target,os`项:因为我们是在裸机上运行,所以我们修改`llvm-target,os`项为 none
 - `linker-flavor`:由于我们需要不依赖平台的链接器这里选用LLVM 提供的跨平台的连接器<font color = green>LLD 连接器(LLD linker)</font>,这是和 rust 编译器一起打包发布的.
 - `panic-strategy`:上一章我们解决`eh-personality`编译报错的时候使用过,我们的编译目标不支持 panic 的时候栈展开,所以我们在 panic 的时候直接终止.这一项是可选的,只要`Cargo.toml`和这里设置一次即可.
@@ -89,4 +90,91 @@ x86 支持两种固件标准:BIOS(basic Input/Output system)和 UEFI(Unified Ext
 
 使用`cargo build --target x86_64-blog_os.json`命令编译内核.
 
+此时会编译报错:
 
+```shell
+error[E0463]: can't find crate for `core`
+  |
+  = note: the `x86_64-blog_os` target may not be installed
+  = help: consider downloading the target with `rustup target add x86_64-blog_os`
+  = help: consider building the standard library from source with `cargo build -Zbuild-std`
+
+error[E0463]: can't find crate for `compiler_builtins`
+
+error[E0463]: can't find crate for `core`
+ --> src/main.rs:6:5
+  |
+6 | use core::panic::PanicInfo;
+  |     ^^^^ can't find crate
+  |
+  = note: the `x86_64-blog_os` target may not be installed
+  = help: consider downloading the target with `rustup target add x86_64-blog_os`
+  = help: consider building the standard library from source with `cargo build -Zbuild-std`
+
+error: requires `sized` lang_item
+
+For more information about this error, try `rustc --explain E0463`.
+warning: `rust_os` (bin "rust_os") generated 1 warning
+error: could not compile `rust_os` due to 4 previous errors; 1 warning emitted
+```
+
+错误信息显示`x86_64-blog_os`未安装,core 模块找不到.其中 core 模块中包含了 rust 的部分基础类型如:`Result,Option,迭代器`等等,并且其还隐式的链接到`no_std`特性中.
+
+通常情况下,`core`crate 以<font color = green> 预编译库(precompiled library)</font>的形式与 Rust 编译器一同发布,因此此时`core`只对宿主系统有效,而对我们的自定义系统无效.如果我们想为其他系统编译代码,我们需要为这个系统重新编译整个`core`crate.
+
+`build-std`选项:
+cargo 中<font color = green>`build-std`特性</font>,允许我们按照自己的需要重新编译`core`等标准 crate,而不需要使用 Rust 安装程序内置的预编译版本.
+
+要启用该特性,需要在`.cargo/config.toml`文件中添加一个配置:
+
+```cargo
+[unstatble]
+build-std=["core","compiler_buildins"]
+```
+
+此配置告诉 cargo 需要重新编译 `core`和`compiler_buildins`两个 crate,其中`compiler_buildins`是`core`的必要依赖.另外编译需要源码,使用`rustup component add rust-src`命令下载它们.
+
+设置并下载完源码之后我们就可以编译了.
+
+### 内存相关的函数
+目前 rust 编译器嘉定所有<font color = green>内置函数(built-in functions)</font> 在所有操作系统内都存在且可用.但是这里只对了一半,绝大多数内置函数都可以被`compiler_buitins`crate提供,而且我们重新编译过了这个 crate,但是部分内存相关的函数需要操作系统相关的标准 C 库提供.比如`memset,memcpy,memcmp`.现在我们还无法提供相关的标准 C 库,所以我们需要其他方法提供这些东西,一种是自己实现相关函数,(注意不要忘记加`#[no_mangle]`,防止编译器重命名).另外一种是使用`compiler_builtins`crate 中提供的相关函数的实现,默认情况下为了避免和标准 C 库发生冲突被禁掉了.可以在`.cargo/config.toml`文件中添加`build-std-features=["compiler-builtins-mem]`项启用这些内置函数.
+
+### 设置默认编译目标
+
+和上一章针对不同平台设置编译目标一样,我们在`.cargo/config.toml`文件中指定编译目标.
+
+```shell
+[build]
+target="x86_64-blog_os.json"
+```
+
+### 向屏幕打印字符
+
+此时我们的内核已经配置完毕,并且能够成功编译`_start`函数,但是此函数仍然是个空循环啥也没有,我们需要向屏幕打印一些东西.
+
+要做到这一步,最简单的方式是写入<font color = green> VGA 字符缓冲区(VGA text buffer)</font>:这是一段映射到 VGA 赢家你的特殊内存片段,包含着显示在屏幕上的内容.通常其能够存储 25 行,80 列共 2000 个字符单元;每个字符单元能够显示一个 ASCII 字符,也能设置字符的前景和背景色.下一章详细讨论 VGA 字符缓冲区的内存布局;这里我们只需知道缓冲区地址是`0x8000`,且每个字符单元包含一个 ASCII 字符字节码和一个颜色字节码.
+
+```rust
+static HELLO: &[u8] = b"hello world!";
+
+#[no_mangle]
+pub extern "C" fn _start() -> !{
+    let vag_buffer = 0xb8000 as *mut u8;
+    for (i,&byte) in HELLO.iter().enumerate(){
+        unsafe {
+            *vga_buffer.offset(i as isize * 2) = byte;
+            *vga_buffer.offset(i as isize * 2 + 1) = 0xb;
+        }
+    }
+    loop{}
+}
+```
+
+这里我们与定义了一个<font color = green>字节字符串(byte string)</font>类型的静态变量,名为`HELLO`.我们首先将整数`0xb8000`转换(cast)成一个裸指针(raw pointer),之后我们迭代`HELLO`每个字节,使用`enumerate`获得一个额外的序号变量`i`.在`for`循环中,我们使用`offset`偏移裸指针,解引用它,来讲字符串的每个字节和对应的颜色--`0xb`淡青色--写入内存位置.
+
+<font color = red>所有裸指针操作都被一个叫`unsafe`的语句块(unsafe block)包裹.</font>因为此时编译器不能保证我们创建的裸指针是有效的:一个裸指针可能只想任何一个你想让其指向的地方,直接解引用并写入它,可能会损坏正常的数据.使用`unsafe`语句块时,程序员告诉编译器,这块代码我负责,你不用管.但是其实`unsafe`并不会关闭 rust 的安全检查机制,其只允许你多做[四件事](https://doc.rust-lang.org/1.30.0/book/second-edition/ch19-01-unsafe-rust.html#unsafe-superpowers):
+
+- 取消引用原始指针
+- 调用不安全的函数或者方法
+- 访问或修改可变静态变量
+- 实时不安全特征
