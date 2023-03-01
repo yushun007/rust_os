@@ -87,4 +87,6 @@ x86 支持两种固件标准:BIOS(basic Input/Output system)和 UEFI(Unified Ext
 
 此时我们已经配置好了我们的内核编译选项,这里我们使用 linux 风格的编写风格即,入口函数命名为`_start`.
 
+使用`cargo build --target x86_64-blog_os.json`命令编译内核.
+
 
