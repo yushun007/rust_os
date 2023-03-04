@@ -212,4 +212,80 @@ volatile = "0.2.6"
 现在,我们使用他来完成 VGA 缓冲区的volatile写入操作.我们将`Buffer`类型定义修改为下列代码:
 
 ```rust
+use volatile::Volatile;
+#[repr(transparent)]
+struct Buffer{
+    cahrs:[[Volatile<ScreenChar>;BUFFER_WIDTH];BUFFER_HEIGHT],
+}
+```
+
+这里我们不使用`ScreenChar`,而使用`Volatile<ScreenChar>`,`Volatile`类型是一个泛型,可以包装几乎所有的类型--这保证了我们不会通过普通的写入操作,以外的向他写入数据;我们转而使用提供的`write`方法.
+
+同时我们需要修改`Writer::write_byte`方法:
+
+```rust
+    pub fn write_byte(&mut self,byte:u8){
+        match byte{
+            b'\n' => self.new_line(),
+            byte => {
+                if self.column_position >= BUFFER_WIDTH{
+                    self.new_line();
+                }
+                
+                let row = BUFFER_HEIGHT -1;
+                let col = self.column_position;
+                let color_code = self.color_code;
+                self.buffer.cahrs[row][col].write(ScreenChar{
+                    ascii_character: byte,
+                    color_code,
+                });
+                self.column_position += 1;
+            }
+        }
+    }
+```
+
+这里不再使用普通的`=`赋值操作,而使用`write`方法.
+
+## 格式化宏
+
+支持 Rust 提供的**格式化宏(formatting macros)**也是一种很好的思路.通过这种途径,我们可以轻松的打印不同类型的变量,如整数,浮点数等.为了支持他们,我们需要实现`core::fmt::Write`trait;要实现它, 唯一需要提供的方法是`write_str`,他和我们先前编写的`write_string`方法类似.只是返回值变成了`fmt::Result`:
+
+```rust
+use core::fmt;
+impl fmt::Write for Writer {
+    fn write_str(&mut self,s:&str)->fmt::Result{
+        self.write_string(s);
+        Ok(())
+    }
+}
+```
+
+这里`Ok(())`属于`Result`枚举类型中的`Ok`,包含一个值为`()`(空值)的变量.
+
+现在我们就可以使用 Rust 内置的格式化宏`write!`和`writeln!`:
+
+```rust
+pub fn print_someting(){
+    use core::fmt::Write;
+    let mut writer = Writer{
+        column_position:0,
+        color_code:ColorCode::new(Color::Green,Color::Black),
+        buffer: unsafe {
+            &mut *(0xb8000 as *mut Buffer)
+        },
+    };
+    writer.write_byte(b'H');
+    writer.write_string("ello! ");
+    write!(writer,"The numbers are {} and {}",23,1.0/3.0).unwrap();
+}
+```
+
+`write!`宏返回的`Result`类型必须被使用,所以我们调用它的`unwrap`方法,它将在错误发生时 panic.
+
+### 换行
+
+在之前的代码中,我们忽略了换行符,因此没有处理超出一行字符的情况.当换行时,我们想要把每个字符向上移动一行--此时最顶上的一行将被删除--然后在最后一行的起始位置继续打印.要走到这一点,我们需要为`Writer`实现一个新的方法`new_line`:
+
+```rust
 ```
