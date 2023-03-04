@@ -432,3 +432,76 @@ pub extern "C" fn _start() -> !{
 ```
 
 这里导入`core::fmt::Write`tarit,来使用实现它的类的相应方法.
+
+## 安全性
+
+经过上面的努力,我们现在的代码只剩下一个`unsafe`代码块,它用于创建一个指向`0xb8000`地址的`Buffer`类型引用;在这步之后,所有的操作都是安全的.Rust 将检查每个数组的边界,所以我们不会在不经意间越界.因此我们把需要条件编码到 Rust 的类型系统,这之后,我们外界提供的接口就符合内存安全原则了.
+
+## println!宏
+
+我们现在有了一个全局实例`WRITER`,我们就可以基于它实现`println!`宏,这样他就能被任意地方的代码使用了.Rust 提供的宏定义语法需要时间理解,所以我们将不从零开始编写这个宏.
+
+标准库中`println!`的实现如下:
+
+```rust
+#[macro_export]
+macro_rules! println{
+    ()=>(print!("\n"));
+    ($($arg:tt)*) => (print!("{}\n",format_args!($($arg)*)));
+}
+```
+
+<font color=blue>宏通过一个或多个**规则(rule)**定义,有点像`match`语句的多分支.`println!`宏有两个规则:第一个不要求传入参数--`println!()`--他将被扩展为`print!("\n")`,打印一个新行;另一个要求传入参数-- `println!("rust ...")`--它将使用`print!`宏扩展,传入他的所有参数,并在输出的字符串后面加一个换行符.</font>
+
+这里,`#[macro_export]`属性让整个包和基于他的包都能访问这个宏,二不仅限于定义他的模块.他还将把宏至于包的根模块(crate root)下,这意味着我们需要通过`use std::println`导入而不是`use std::macros::println`.
+
+`print!`宏的定义如下:
+
+```rust
+#[macro_export]
+macro_rules! print{
+    ($($arg:tt)*) => ($crate::io::_print(format_args!($($arg)*)));
+}
+```
+
+这个宏将扩展为一个对 io 模块中`_print`函数的调用.`$crate`变量将在 `std`包之外被解析为`std`包,保证整个宏在`std`包之外可以使用.
+
+`format_args!`宏将传入的参数搭建为一个`fmt::Arguments`类型,这个类型将被传入`_print`函数.`std`包中的`_print`函数将调用复杂的私有函数`print_to`,来处理对不同`Stdout`设备的支持.我们不需要写这样复杂的函数,因为我们只需要支持 VGA 输出.
+
+要打印到字符缓冲区,我们把`println!,print!`两个函数复制过来,修改部分源码,让这些宏使用我们自定义的`_print`函数:
+
+```rust
+#[macro_export]
+macro_rules! print {
+    ($($arg:tt)*) => {
+        $crate::vga_buffer::_print(format_args!($($arg)*))
+    };
+}
+
+#[macro_export]
+macro_rules! println {
+    () => {
+        $crate::print!("\n")
+    };
+    ($($arg::tt)*) => {
+        $crate::print!("{}\n",format_args!($($arg)*))
+    };
+}
+
+#[doc(hidden)]
+pub fn _print(args: fmt::Arguments){
+    use core::fmt::Write;
+    WRITER.lock().write_fmt(args).unwrap();
+}
+```
+
+我们先修改了`println!`宏,在每个`print!`宏前面添加了`$crate`变量.这样我们在只需要使用`println!`时,不必也编写代码导入`print!`宏.
+
+注意我们对两个宏都是用了`#[macro_export]`属性,所以现在这两个宏属于根命名空间(root namespace),所以我们需要使用`use crate::println`导入.
+
+另外,`_print`函数将占用`WRITER`变量的锁,并调用他的`write_fmt`函数.这个方法是从名为`Write`的 trait 中获得的,所以我们需要导入这个 trait.额外的`unwrap()`函数将在打印不成功时 panic.
+
+如果这个宏将在模块外访问,它们也应当能访问`_print`函数,因此这个函数必须是 pub 函数.然而,考虑到这是一个私有实现,这里添加`doc(hidden)`属性,防止其出现在文档中.
+
+### 使用 println!的 Hello World
+
