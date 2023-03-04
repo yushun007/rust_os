@@ -505,3 +505,26 @@ pub fn _print(args: fmt::Arguments){
 
 ### 使用 println!的 Hello World
 
+在`_start`函数中使用`println!`宏:
+
+```rust
+#[no_mangle]
+pub extern "C" fn _start() -> !{
+    println!("hello world{}{}","!",3);
+    loop{}
+}
+```
+
+### 打印 panic 信息
+
+现在我们有了`println!`宏,我们可以在 panic 处理函数中使用它打印 panic 信息和 panic 产生的位置了:
+
+```rust
+#[panic_handler]
+fn panic(_info:&PanicInfo)->!{
+    println!("{}",_info);
+    loop{}
+}
+```
+
+当我们在`_start`函数中插入一行`panic!("Some panic message!")`之后,我们就会屏幕上显示 panic 信息了.

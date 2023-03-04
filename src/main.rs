@@ -8,13 +8,13 @@ mod vga_buffer;
 
 #[no_mangle]
 pub extern "C" fn _start() -> !{
-    use core::fmt::Write;
-    vga_buffer::WRITER.lock().write_str("Hello again").unwrap();
-    write!(vga_buffer::WRITER.lock(),",some numbers:{} {}",23,1.0/3.0).unwrap();
+    println!("hello world1{}","!");
+    panic!("Some panic message!");
     loop{}
 }
-//裸机程序,因为没有操作系统的支持,所以不能使用标准库,需要添加#![no_std]属性
+//panic处理函数
 #[panic_handler]
 fn panic(_info:&PanicInfo)->!{
+    println!("{}",_info);
     loop{}
 }

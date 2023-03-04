@@ -85,6 +85,8 @@ impl Writer{
                 self.buffer.chars[row-1][col].write(character);
             }
         }
+        self.clear_row(BUFFER_HEIGHT -1 );
+        self.column_position = 0;
     }
     fn clear_row(&mut self,row:usize){
         let blank = ScreenChar{
@@ -132,11 +134,11 @@ macro_rules! print {
 }
 
 #[macro_export]
-macro_rules! println {
+macro_rules! println{
     () => {
         $crate::print!("\n")
     };
-    ($($arg::tt)*) => {
+    ($($arg:tt)*) => {
         $crate::print!("{}\n",format_args!($($arg)*))
     };
 }
