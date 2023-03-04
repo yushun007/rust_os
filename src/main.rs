@@ -4,8 +4,17 @@
 #![no_std]
 #![no_main]
 use core::panic::PanicInfo;
+static HELLO: &[u8] = b"hello world!";
+
 #[no_mangle]
-pub extern "C" fn _start()->!{
+pub extern "C" fn _start() -> !{
+    let vga_buffer = 0xb8000 as *mut u8;
+    for (i,&byte) in HELLO.iter().enumerate(){
+        unsafe {
+            *vga_buffer.offset(i as isize * 2) = byte;
+            *vga_buffer.offset(i as isize * 2 + 1) = 0xb;
+        }
+    }
     loop{}
 }
 //裸机程序,因为没有操作系统的支持,所以不能使用标准库,需要添加#![no_std]属性
