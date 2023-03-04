@@ -321,4 +321,114 @@ pub fn print_someting(){
 编写其他模块时,我们希望无需随时拥有`Write`实例,便能使用它的方法.我们尝试创建一个静态的`WRITER`变量:
 
 ```rust
+pub static WRITER: Writer = Writer{
+    column_position:0,
+    color_code:ColorCode::new(Color::Green,Color::Blue),
+    buffer: unsafe {
+        &mut *(0xb8000 as *mut Buffer)
+    },
+};
 ```
+
+此时我们编译会报错:
+
+```shell
+   Compiling rust_os v0.1.1 (/Users/yushun/develop/rust_os)
+error[E0015]: cannot call non-const fn `ColorCode::new` in statics
+   --> src/vga_buffer.rs:131:16
+    |
+131 |     color_code:ColorCode::new(Color::Green,Color::Blue),
+    |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: calls in statics are limited to constant functions, tuple structs and tuple variants
+    = note: consider wrapping this expression in `Lazy::new(|| ...)` from the `once_cell` crate: https://crates.io/crates/once_cell
+
+error[E0658]: dereferencing raw mutable pointers in statics is unstable
+   --> src/vga_buffer.rs:133:9
+    |
+133 |         &mut *(0xb8000 as *mut Buffer)
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: see issue #57349 <https://github.com/rust-lang/rust/issues/57349> for more information
+    = help: add `#![feature(const_mut_refs)]` to the crate attributes to enable
+
+Some errors have detailed explanations: E0015, E0658.
+For more information about an error, try `rustc --explain E0015`.
+error: could not compile `rust_os` due to 2 previous errors
+```
+
+这里我们需要知道一点:一般变量在运行时初始化,而静态变量则是在编译时初始化.rust 编译器规定了一个成为**常量求解器(const evaluator)**的组件,他会在编译时处理这样的初始化操作.虽然现在其功能有限,但是对他的扩展很活跃,比如允许在常量中 panic 的[一篇文章](https://github.com/rust-lang/rfcs/pull/2345)
+
+关于`ColorCode::new`的问题应该使用`consts functions` 解决,但常量求解器还不能处理在编译时直接将裸指针到变量的引用.
+
+### 延迟初始化
+
+使用非常函数初始化静态变量是 Rust 程序员普遍遇到的问题.幸运的是,有一个叫做`lazy_static`的包提供了一个很棒的解决方案:他提供了一个`lazy_static!`宏,定义一个**延迟初始化(lazily initialized)**的静态变量;这个变量的值将在第一次使用时计算,而非在编译时计算.这时,变量的初始化过程将在运行时进行,任意的初始化代码--无论简单或者复杂--都能够使用.
+
+导入此包:
+
+```config
+[dependencies.lazy_static]
+version = "1.0"
+features = ["spin_no_std"]
+```
+
+由于我们不使用标准库所以启用,`spin_no_std`特性.
+
+使用`lazy_static`我们就可以定义一个不出问题的`WRITER`变量:
+
+```rust
+use lazy_static::lazy_static;
+lazy_static!{
+    pub static ref WRITER: Writer = Writer{
+        column_position:0,
+        color_code:ColorCode::new(Color::Green,Color::Blue),
+        buffer: unsafe {
+            &mut *(0xb8000 as *mut Buffer)
+        },
+    };
+}
+```
+
+然而,这个`WRITER`可能没什么用,因为它目前还是不可变量(immutable variable):
+这意味着我们无法向其写入数据.一种方法是使用可变静态变量,但是对其的所有读写操作都被标记为不安全(unsafe)操作,因为这容易造成数据竞争.一些替代方案是使用`RefCell`或者`UnsafeCell`等类型提供的内部可变性;但这些类型都被设计为非同步类型,即不满足 `Sync`约束,所以我们不能再静态变量中使用他们.
+
+## spinlock
+
+要定义同步的内部可变性,我们往往使用标准库提供的**互斥锁类(Mutex)**,他提供当资源被占用时将线程阻塞的互斥条件.实现这一点:我们初步的内核代码还没有线程和阻塞的概念,现在还不能使用这个类.不过我们还有一种较为基础的互斥锁实现方式--**自旋锁(spinlock)**.自旋锁不会调用阻塞逻辑,而是在一个小的无限循环中反复尝试获得这个锁,也因此会一直占用 CPU 时间,知道互斥锁被他的占用着释放.
+
+为了使用自旋锁,我们添加`spin`包:
+
+```config
+[dependencies]
+spin="0.5.2"
+```
+
+现在,我们能够使用自旋锁,为我们的`WRITER`实现安全的内部可变性:
+
+```rust
+use spin::Mutex;
+lazy_static!{
+    pub static ref WRITER: Mutex<Writer> = Mutex::new(Writer {
+        column_position:0,
+        color_code:ColorCode::new(Color::Green,Color::Blue),
+        buffer: unsafe {
+            &mut *(0xb8000 as *mut Buffer)
+        },
+    });
+}
+```
+
+现在我们可以删除`print_someting`函数,尝试直接在`_start`函数中直接打印:
+
+```rust
+#[no_mangle]
+pub extern "C" fn _start() -> !{
+    use core::fmt::Write;
+    vga_buffer::WRITER.lock().write_str("Hello again").unwrap();
+    write!(vga_buffer::WRITER.lock(),",some numbers:{} {}",23,1.0/3.0).unwrap();
+    loop{}
+}
+```
+
+这里导入`core::fmt::Write`tarit,来使用实现它的类的相应方法.
