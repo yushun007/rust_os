@@ -213,3 +213,13 @@ bootloader = "0.9.23"
 在 QEMU 中启动内核
 
 现在我们可以再虚拟机中启动内核了.`qemu-system-x86_64 -drive format=raw,file=target/x86_64-blog_os/debug/bootimage-blog_os.bin`
+
+### 使用argo run
+
+可以在`.cargo/config.toml`中添加配置使得在 qemu 中运行更容易
+
+```config
+[target.'cfg(target_os = "none")]
+runner = "bootimage runner"
+```
+
