@@ -288,4 +288,37 @@ pub fn print_someting(){
 在之前的代码中,我们忽略了换行符,因此没有处理超出一行字符的情况.当换行时,我们想要把每个字符向上移动一行--此时最顶上的一行将被删除--然后在最后一行的起始位置继续打印.要走到这一点,我们需要为`Writer`实现一个新的方法`new_line`:
 
 ```rust
+    fn new_line(&mut self){
+        for row in 1..BUFFER_HEIGHT{
+            for col in 0..BUFFER_WIDTH{
+                let character = self.buffer.chars[row][col].read();
+                self.buffer.chars[row-1][col].write(character);
+            }
+        }
+    }
+```
+
+我们遍历屏幕上的每个字符,把每个字符移动到它上方一行的相应位置.这里,`..`符号表示区间标号的一种;它表示左闭右开的区间,因此不包含其上界.在外层的没居中,我们从第一行开始,省略对第 0 行的枚举过程--因为这一行应该被移出屏幕,即它将被下一行的字符覆写.
+
+所以我们实现的`clear_row`方法如下:
+
+```rust
+    fn clear_row(&mut self,row:usize){
+        let blank = ScreenChar{
+            ascii_character:b' ',
+            color_code:self.color_code,
+        };
+        for col in 0..BUFFER_WIDTH{
+            self.buffer.chars[row][col].write(blank);
+        }
+    }
+```
+
+通过向对应缓冲区写入空格,清空一行字符.
+
+## 全局接口
+
+编写其他模块时,我们希望无需随时拥有`Write`实例,便能使用它的方法.我们尝试创建一个静态的`WRITER`变量:
+
+```rust
 ```
