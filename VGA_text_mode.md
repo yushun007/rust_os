@@ -85,4 +85,131 @@ impl ColorCode {
 现在,我们可以添加更多的结构体,来描述屏幕上的字节和整个字符缓冲区:
 
 ```rust
+#[derive(Debug,Clone,Copy,PartialEq,Eq)]
+#[repr(C)]
+struct ScreenChar{
+    ascii_character: u8,
+    color_code:ColorCode,
+}
+
+const BUFFER_HEIGHT: usize = 25;
+const BUFFER_WIDTH: usize = 80;
+
+#[repr(transparent)]
+struct Buffer{
+    cahrs:[[ScreenChar;BUFFER_WIDTH];BUFFER_HEIGHT],
+}
+
+```
+
+在内存布局层面,rust 并不保证按顺序布局成员变量.因此我们使用`#[repr(C)]`标记结构体;这将按照 C语言约定顺序布局成员变量.对`Buffer`类型,我们咋次使用`repr(transparent)`,确保类型和他的单个成员有相同的内存布局.
+
+
+为了输出字符到屏幕,创建一个 Writer 类型:
+
+```rust
+pub struct Writer{
+    column_position:usize,
+    color_code:ColorCode,
+    buffer:&'static mut Buffer,
+}
+```
+
+我们将让`Writer`类型将字符写入屏幕的最后一行,并在一行写满或者接受到换行符`\n`的时候,将所有字符向上位移一行.`colum_position`变量将跟踪光标在最后一行的位置.当前字符的颜色由`color_code`表示;另外,我们存入一个Buffer 类型的可变借用到`buffer`变量中.<font color=red>这里我们对借用使用**显式生命周期(explicti lifetime)**,告诉编译器这个借用在何时有效:我们使用`'static`lifetime,这意味着这个借用应该在整个程序的运行期间都有效;这对一个全局有效的 VGA 字符缓冲区来说,是非常合理的</font>
+
+### 打印字符
+
+现在使用`Writer`类型来更改缓冲区内的字符.首先,为了写入一个 ASCII 字节码,创建:
+
+```rust
+impl Writer{
+    pub fn write_byte(&mut self,byte:u8){
+        match byte{
+            b'\n' => self.new_line(),
+            byte => {
+                if self.column_position >= BUFFER_WIDTH{
+                    self.new_line();
+                }
+                
+                let row = BUFFER_HEIGHT -1;
+                let col = self.column_position;
+                let color_code = self.color_code;
+                self.buffer.cahrs[row][col] = ScreenChar{
+                    ascii_character: byte,
+                    color_code,
+                };
+                self.column_position += 1;
+            }
+        }
+    }
+    fn new_line(&mut self){
+        /* TODO */
+    }
+}
+```
+
+如果这个字节是个换行符`\n`,`Writer`不应该打印新字符,相反会调用稍后实现的`new_line`函数;其他字节将在`match`语句的第二个分支中被打印到屏幕上.
+
+要打印整个字符串,我们把它转换成字节并依次输出:
+
+```rust
+    pub fn write_string(&mut self,s:&str){
+        for byte in s.bytes(){
+            match byte{
+                //可以使能够打印的字节码,也可以是'\n'
+                0x20..=0x7e | b'\n' => self.write_byte(byte),
+                //其他字符打印0xfe
+                _ => self.write_byte(0xfe),
+            }
+        }
+    }
+```
+
+VGA字符缓冲区只支持 ASCII 字节码和[代码页](https://en.wikipedia.org/wiki/Code_page_437)定义的字符.rust 语言的字符默认编码为`UTF-8`,因此可能包含一些 VGA 不支持的字节码:我们使用`match`语句,来区别可打印和无法打印的字节.无法打印的字符我们打印`0xfe`字符.
+
+为了测试我们的`Writer`我们临时编写一段代码:
+
+```rust
+pub fn print_someting(){
+    let mut writer = Writer{
+        column_position:0,
+        color_code:ColorCode::new(Color::Yellow,Color::Black),
+        buffer: unsafe {& mut *(0xb8000 as *mut Buffer)},
+    };
+    writer.write_byte(b'H');
+    writer.write_string("ello ");
+    writer.write_string("Wörld!");
+}
+```
+
+这个函数首先创建一个指向`0xb8000`地址 VGA 缓冲区的`Writer`.实现这一点我们需要编写的代码看起来有点奇怪:首先我们把整数`0xb8000`强制转换成**裸指针(raw pointer)**;之后,通过运算符`*`解引用;最后,我们通过`&mut`,再次获得它的可变借用.这些转换需要`unsafe`语句块,因为编译器并不能保证这个裸指针是有效的.
+
+然后它将字节`b'H'`吸入缓冲区.前缀`b`创建了一个**字节常量(byte literal)**,表示单个 ASCII 字节码;通过尝试写入`ello,Wörld!`,测试`write_string`方法.然后我们在`_start`函数中调用`print_someting`方法:
+
+```rust
+#[no_mangle]
+pub extern "C" fn _start()->!{
+    vga_buffer::print_someting();
+    loop{}
+}
+```
+
+### 易失操作
+
+由于 rust 编译器优化功能很激进,我们的代码中的`buffer`只存在写入而没有读取的操作,rust 编译器可能会给优化掉.
+
+这些写入操作应该被认为是易失操作,所以我们需要告诉编译器这些东西不能优化掉.
+
+这里我们使用`volatile`库.这个包(crate)提供了一个名为`Volatile`的**包装类型(wrapping type)**和它的`read,write`方法:这些方法包装了`core::ptr`内的`read_volatile,write_volatile`函数,从而保证读操作或者写操作不会被编译器优化掉.
+
+要添加`volatile`包为项目的依赖项,在`Cargo.toml`文件中添加:
+
+```config
+[dependencies]
+volatile = "0.2.6"
+```
+
+现在,我们使用他来完成 VGA 缓冲区的volatile写入操作.我们将`Buffer`类型定义修改为下列代码:
+
+```rust
 ```
