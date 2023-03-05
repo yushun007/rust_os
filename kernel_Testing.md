@@ -263,4 +263,8 @@ fn panic(_info:&PanicInfo)->!{
 }
 ```
 
-## 
+## 隐藏 QEMU
+由于使用`isa-debug-exit`设备和串行设备来报告完整的测试结果,所以我们不再需要 QEMU 的窗口了.通过向其传递`-display none`参数隐藏窗口:
+
+```config
+```
