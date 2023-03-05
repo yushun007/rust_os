@@ -207,7 +207,7 @@ macro_rules! serial_println {
 }
 ```
 
-和之前的`print!,println!`类似.由于`SerialPort`类型已经实现了`fmt::Write`trail,所以我么你不需要提供自己的实现.
+和之前的`print!,println!`类似.由于`SerialPort`类型已经实现了`fmt::Write`trait,所以我么你不需要提供自己的实现.
 
 现在我们可以从测试代码想串行接口打印而不是向 VGA 文本缓冲区打印了:
 
@@ -264,6 +264,7 @@ fn panic(_info:&PanicInfo)->!{
 ```
 
 ## 隐藏 QEMU
+
 由于使用`isa-debug-exit`设备和串行设备来报告完整的测试结果,所以我们不再需要 QEMU 的窗口了.通过向其传递`-display none`参数隐藏窗口:
 
 ```config
@@ -286,3 +287,49 @@ bootimage 默认会有 5 分钟的超时检测,如果超时会向控制台输出
 test-timeout=120 $(in seconds)
 ```
 
+## 自动添加打印语句
+
+`trivial_assertion`测试仅能使用`serial_print!,serial_println!`输出自己的状态信息:
+
+为每个测试手动添加固定的日志太麻烦,我们修改一下`test_runner`把这部分逻辑改进一下,使其可以自动添加日志输出.那么我们先建立一个`Testable trait`:
+
+```rust
+pub trait Testable {
+    fn run(&self)->();
+}
+
+impl<T> Testable for T where T:Fn(),{
+    fn run(&self){
+        serial_print!("{}..\t",core::any::type_name::<T>());
+        self();
+        serial_println!("[OK]");
+    }
+}
+```
+
+我们定义一个trait,`Testable`其中包含一个函数`run`,实现中指定只有实现了`Fn()`trait 的泛型可以使用这个实现
+我们实现的`run`函数中,首先使用`any::type_name`输出函数名,这个函数事实上是被编译器实现的,可以返回任意类型的字符串形式.对于函数而言,其类型的字符串形式就是它的函数名,而函数名也正是我们想要的测试用例名称.至于`\t`代表制表符,为后面的`[OK]`添加点距离.
+
+输出函数名之后,我们通过`self()`调用了测试函数本身,该调用方式属于`Fn()`trait 独有,如果测试函数顺利执行,则输出`[OK]`.
+
+最后一步为`test_runner`的参数附加上`Testable trait`:
+
+```rust
+#[cfg(test)]
+fn test_runner(tests: &[&dyn Testable]){
+    serial_println!("Running {} tests",tests.len());
+    for test in tests{
+        test.run();
+    }
+    exit_qemu(QemuExitCode::Success);
+}
+```
+
+由于我们已经完成了收尾的输出自动化,所以`trivial_assertion`就可以删掉这些输出.
+
+```rust
+#[test_case]
+fn trivial_assertion(){
+    assert_eq!(1,1);
+}
+```
