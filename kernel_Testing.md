@@ -267,4 +267,22 @@ fn panic(_info:&PanicInfo)->!{
 由于使用`isa-debug-exit`设备和串行设备来报告完整的测试结果,所以我们不再需要 QEMU 的窗口了.通过向其传递`-display none`参数隐藏窗口:
 
 ```config
+test-args = ["-device","isa-debug-exit,iobase=0xf4,iosize=0x04","-serial","stdio","-display","none"]
 ```
+
+## 超时
+
+由于`cargo test`会等待`test runner`退出,如果一个测试永远不返回那么它将阻塞`test runner`,幸运的是,在实际应用中这并不是大问题,因为无限循环通常很容易避免.无限循环会发生在一下几种不同的情况中:
+
+- bootloader加载内核失败,导致系统不停地重启;
+- BIOS/UEFI 固件加载 bootloader 失败,同样会无限重启;
+- CPU 在某些函数中进入 loop{}中.
+- 硬件触发了系统重置,例如未捕获 CPU 异常时.
+
+bootimage 默认会有 5 分钟的超时检测,如果超时会向控制台输出`Timed Out`错误.
+这个时间可以通过配置设置:
+
+```config
+test-timeout=120 $(in seconds)
+```
+
