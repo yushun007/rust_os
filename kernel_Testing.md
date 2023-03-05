@@ -410,4 +410,136 @@ fn panic(info:&PanicInfo)->!{
 
 这里需要注意的是,集成测试环境中的测试都是单独的可执行文件,所以我们需要再次提供所有的 crate 属性(no_std 等).还需要提供新的入口函数`_start`,用于调用测试入口函数`test_main`.但是我们不需要任何`[cfg]`条件编译属性.
 
-##
+## 创建一个库
+
+为了让这些函数能在我们的集成测试中使用,我们需要从我们的`main.rs`中分割出一个库,这个哭应当可以被其他的 crate 和集成测试可执行文件使用.为了达成这个目的,我们创建了一个新文件,`src/lib.rs`:
+
+```rust
+// in src/lib.rs
+
+#![no_std]
+```
+
+和`main.rs`一样,`lib.rs`也是一个被 cargo 自动识别的特殊文件.该库是一个独立编译单元,所以我们再次指定`#![no_std]`属性.
+
+为了让我们的库可以和`cargo test`一起协同工作,我们还需要移动一下测试函数和属性:
+
+```rust
+#![no_std]
+#![no_main]
+#![feature(custom_test_frameworks)]
+#![test_runner(crate::test_runner)]
+#![reexport_test_harness_main = "test_main"]
+use core::panic::PanicInfo;
+
+
+//测试函数
+pub trait Testable {
+    fn run(&self)->();
+}
+
+impl<T> Testable for T where T:Fn(),{
+    fn run(&self){
+        serial_print!("{}...\t",core::any::type_name::<T>());
+        self();
+        serial_println!("[OK]");
+    }
+}
+
+pub fn test_runner(tests: &[&dyn Testable]){
+    serial_println!("Running {} tests",tests.len());
+    for test in tests{
+        test.run();
+    }
+    exit_qemu(QemuExitCode::Success);
+}
+
+#[test_case]
+fn trivial_assertion(){
+    assert_eq!(1,1);
+}
+
+
+#[cfg(test)]
+#[no_mangle]
+pub extern "C" fn _start() -> !{
+    println!("hello world1{}","!");
+    test_main();
+    loop {
+    }
+}
+
+#[cfg(test)]
+#[panic_handler]
+fn panic(_info:&PanicInfo)->!{
+    serial_println!("[failed]\n");
+    serial_println!("Error: {}",_info);
+    exit_qemu(QemuExitCode::Failed);
+    loop {
+    }
+}
+```
+
+为了能在可执行文件和集成测试中使用`test_runner`,我们不对其使用`[cfg(test)]`属性,并将其设为 public.同时还将 panic handler 函数分解为 public`test_panic_handler`和`panic`函数.
+
+将`QemuExitCode`枚举和`exit_qemu`函数从`main.rs`移至`lib.rs`中并设为 public:
+
+```rust
+//in src/lib.rs
+#[derive(Debug,Clone,Copy,PartialEq,Eq)]
+#[repr(u32)]
+pub enum QemuExitCode {
+    Success = 0x10,
+    Failed = 0x11,
+}
+
+pub fn exit_qemu(exit_code: QemuExitCode){
+    use x86_64::instructions::port::Port;
+    unsafe{
+        let mut port = Port::new(0xf4);
+        port.write(exit_code as u32);
+    }
+}
+```
+
+现在,可执行文件和集成测试都可以从苦衷导入这些函数,而不需要自己实现定义.为了使用`println!,serial_println!`可以将一下模块声明也移到`lib.rs`中:
+
+```rust
+//in src/lib.rs
+pub mod serial;
+pub mod vga_buffer;
+```
+
+现在修改`main.rs`来使用库:
+
+```rust
+#![no_std]
+#![no_main]
+#![feature(custom_test_frameworks)]
+#![test_runner(rust_os::test_runner)]
+#![reexport_test_harness_main = "test_main"]
+use core::panic::PanicInfo;
+use rust_os::println;
+
+
+
+#[no_mangle]
+pub extern "C" fn _start() -> !{
+    println!("hello world1{}","!");
+    loop {
+    }
+}
+//panic处理函数
+#[cfg(not(test))]
+#[panic_handler]
+fn panic(_info:&PanicInfo)->!{
+    println!("{}",_info);
+    loop {
+    }
+}
+```
+
+
+可以看到,这个库用起来和一个普通的外部库 crate 一样.
+
+## 
