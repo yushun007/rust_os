@@ -376,3 +376,38 @@ fn test_println_output(){
 
 这个测试函数使用`println!`将字符串写入 VGA 字符缓冲区,然后又从`WRITER`中读取字符缓冲区.
 
+## 集成测试
+
+在 Rust 中,**集成测试(integration tests)**的约定是将其放到项目根目录中的`test`目录下.无论是默认测试框架还是自定义测试框架都将自动获取并执行该目录下的所有的测试.
+
+所有的集成测试都是他们自己的可执行文件,并且与我们的`main.rs`完全独立.这也就意味着每个测试都需要定义他们自己的函数入口点.我们创建一个名为`basic_boot`的例子:
+
+```rust
+// in tests/basic_boot.rs
+#![no_std]
+#![no_main]
+#![feature(custom_test_frameworks)]
+#![test_runner(crate::test_runner)]
+#![reexport_test_harness_main = "test_main"]
+
+use core::panic::PanicInfo;
+
+#[no_mangle]
+pub extern "C" fn _start()->!{
+    test_main();
+    loop{}
+}
+
+fn test_runner(tests:&[&dyn Fn()]){
+    unimplemented!();
+}
+
+#[panic_handler]
+fn panic(info:&PanicInfo)->!{
+    loop{}
+}
+```
+
+这里需要注意的是,集成测试环境中的测试都是单独的可执行文件,所以我们需要再次提供所有的 crate 属性(no_std 等).还需要提供新的入口函数`_start`,用于调用测试入口函数`test_main`.但是我们不需要任何`[cfg]`条件编译属性.
+
+##
