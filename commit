@@ -1,3 +1,4 @@
 #! /bin/zsh
 git add .
 git commit -s
+git push

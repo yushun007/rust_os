@@ -333,3 +333,46 @@ fn trivial_assertion(){
     assert_eq!(1,1);
 }
 ```
+
+## 测试 VGA 缓冲区
+
+现在我们已经有了一个可以工作的测试框架了,我们可以为我们的 VGA 缓冲区实现创建一些测试.首先创建一个非常简单的测试来验证`println!`是否正常运行而不会 panic:
+
+```rust
+//in src/vga_buffer.rs
+
+#[test_case]
+fn test_print_ln_simple(){
+    println!("test_println_simple output");
+}
+```
+
+为了确保打印很多行也不会出问题,所以我们多输出一些:
+
+```rust
+//in src/vga_buffer.rs
+
+#[test_case]
+fn test_println_simple(){
+    for _ in 0..200{
+        println!("test_println_simple output");
+    }
+}
+```
+
+还可以创建另一个测试函数,来验证打印的几行字符是否真的出现在了屏幕上:
+
+```rust
+#[test_case]
+fn test_println_output(){
+    let S = "Some test string that fits on a single line";
+    println!("{}",S);
+    for (i,c) in S.chars().enumerate(){
+        let screen_char = WRITER.lock().buffer.chars[BUFFER_HEIGHT -2 ][i].read();
+        assert_eq!(char::from(screen_char.ascii_character),c);
+    }
+}
+```
+
+这个测试函数使用`println!`将字符串写入 VGA 字符缓冲区,然后又从`WRITER`中读取字符缓冲区.
+
