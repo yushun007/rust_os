@@ -157,4 +157,59 @@ uart_16550 = "0.2.0"
 这个包包含了一个代表UART寄存器的`SerialPort`结构体,但是我们仍然需要自己来创建一个相应的对象.
 
 ```rust
+//in src/main.rs
+mod serial;
+//in src/serial.rs
+use uart_16550::SerialPort;
+use spin::Mutex;
+use lazy_static::lazy_static;
+
+lazy_static!{
+    pub static ref SERIAL1:Mutex<SerialPort> = {
+        let mut serial_port = unsafe{ SerialPort::new(0x3F8)};
+        serial_port.init();
+        Mutex::new(serial_port)
+    };
+}
+
+```
+
+就像 VGA 文本缓冲区一样,我们使用`lazy_static`和一个自旋锁来创建一个`static SERIAL1`实例.通过使用`lazy_static`我们保证`init`方法只会在该对象第一次被使用时被调用.
+
+和`isa-debug-exit`设备一样,UART 也是通过端口 I/O进行编程.由于 UART 相对来讲更加复杂,它使用多个 I/O 端口来对不同的设备寄存器进行编程.`unsafe`的`SerialPort::new`函数需要 UART 的第一个 I/O端口的地址作为参数,从改地址中可以计算出所有所需端口的地址.我们传递端口地址为`0x3F8`,改地址是第一个串行接口的标准端口号.
+
+为了使串口更加易用,我们添加两个宏:`serial_print!,serial_println!`:
+
+```rust
+#[doc(hidden)]
+pub fn _print(args: ::core::fmt::Arguments){
+    use core::fmt::Write;
+    SERIAL1.lock().write_fmt(args).expect("Printing to serial failed!");
+}
+
+
+#[macro_export]
+macro_rules! serial_print {
+    ($($arg:tt)*) => {
+        $crate::serial::_print(format_args!($($arg)*));
+    };
+}
+
+#[macro_export]
+macro_rules! serial_println {
+    () => {
+        $crate::serial_print!("\n")
+    };
+    ($fmt:expr) => ($crate::serial_print!(concat!($fmt,"\n")));
+    ($fmt:expr,$($arg:tt)*) => ($crate::serial_print!(
+        concat!($fmt,"\n"),$($arg)*
+    ));
+}
+```
+
+和之前的`print!,println!`类似.由于`SerialPort`类型已经实现了`fmt::Write`trail,所以我么你不需要提供自己的实现.
+
+现在我们可以从测试代码想串行接口打印而不是向 VGA 文本缓冲区打印了:
+
+```rust
 ```
