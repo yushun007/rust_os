@@ -212,4 +212,55 @@ macro_rules! serial_println {
 现在我们可以从测试代码想串行接口打印而不是向 VGA 文本缓冲区打印了:
 
 ```rust
+#[cfg(test)]
+fn test_runner(tests: &[&dyn Fn()]){
+    serial_println!("Running {} tests",tests.len());
+    for test in tests{
+        test();
+    }
+    exit_qemu(QemuExitCode::Success);
+}
+
+#[test_case]
+fn trivial_assertion(){
+    serial_print!("trivial assertion ...");
+    assert_eq!(1,1);
+    serial_println!("[OK]");
+}
 ```
+
+### QEMU参数
+
+为了查看 QEMU 的串行输出,我们需要使用`-serial`参数将输出重定向到 stdout:
+
+```config
+[package.metadata.bootimage]
+test-args = ["-device","isa-debug-exit,iobase=0xf4,iosize=0x04","-serial","stdio"]
+```
+
+此时我们使用`cargo test`可以看到终端输出了测试结果,但是测试失败的结果仍然会打印在 QEMU 中.这是因为我们的panic handler 函数还是使用的`println!`宏.
+
+### 在 panic时打印一个错误信息
+
+为了在 panic 时使用错误信息来推出 QEMU,我们使用**条件编译**在测试模式和非测试模式中使用不同的 panic 处理方式:
+
+```rust
+//panic处理函数
+#[cfg(not(test))]
+#[panic_handler]
+fn panic(_info:&PanicInfo)->!{
+    println!("{}",_info);
+    loop {
+    }
+}
+#[cfg(test)]
+#[panic_handler]
+fn panic(_info:&PanicInfo)->!{
+    serial_println!("[failed]\n");
+    serial_println!("Error: {}",_info);
+    loop {
+    }
+}
+```
+
+## 
