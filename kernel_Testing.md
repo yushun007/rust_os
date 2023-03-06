@@ -542,4 +542,11 @@ fn panic(_info:&PanicInfo)->!{
 
 可以看到,这个库用起来和一个普通的外部库 crate 一样.
 
-## 
+## 完成集成测试
+
+此时我们的`tests/basic_boot.rs`就可以使用直接从库中导入各种类型了.
+
+```rust
+#![test_runner(rust_os::test_runner)]
+use rust_os::test_panic_handler;
+```
